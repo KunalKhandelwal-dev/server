@@ -26,6 +26,10 @@ const sheets = google.sheets({ version: "v4", auth });
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
 
+app.get("/", (req, res) => {
+  res.send("✅ Backend deployed successfully and is running!");
+});
+
 app.post("/submit", async (req, res) => {
   try {
     const { name, mobileNumber, eventType, college } = req.body;
