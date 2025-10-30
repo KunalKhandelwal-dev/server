@@ -52,7 +52,7 @@ app.post("/submit", async (req, res) => {
       valueInputOption: "RAW",
       requestBody: {
         values: [
-          [srNo, name, mobileNumber, eventType, college, new Date().toLocaleString()],
+          [srNo, name, mobileNumber, eventType, college, new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })],
         ],
       },
     });
