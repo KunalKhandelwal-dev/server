@@ -10,7 +10,8 @@ const app = express();
 app.use(cors({
   origin: [
     "https://yugantran.netlify.app",  // ✅ your frontend on Netlify
-    "http://localhost:3000"           // ✅ still allow local testing
+    "http://localhost:3000",           // ✅ still allow local testing
+    "http://localhost:5173"
   ],
   methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true
