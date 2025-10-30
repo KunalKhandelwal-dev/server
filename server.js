@@ -8,8 +8,12 @@ import fs from "fs";
 dotenv.config();
 const app = express();
 app.use(cors({
-  origin: process.env.CLIENT_ORIGIN || "http://localhost:3000",
-  methods: ["GET", "POST"],
+  origin: [
+    "https://yugantran.netlify.app",  // ✅ your frontend on Netlify
+    "http://localhost:3000"           // ✅ still allow local testing
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  credentials: true
 }));
 app.use(bodyParser.json());
 // app.use(express.static("public"));
