@@ -1,19 +1,24 @@
 import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
+import multer from "multer";
 import { google } from "googleapis";
 import dotenv from "dotenv";
+import path from "path";
+import fs from "fs";
 
 dotenv.config();
 const app = express();
 
-// ✅ Middleware
+/* ---------------------------
+   🧩 Middleware Setup
+--------------------------- */
 app.use(
   cors({
     origin: [
-      "https://yugantran.netlify.app", // deployed frontend
-      "http://localhost:3000",         // local CRA
-      "http://localhost:5173"          // local Vite
+      "https://yugantran.netlify.app",
+      "http://localhost:3000",
+      "http://localhost:5173",
     ],
     methods: ["GET", "POST"],
     credentials: true,
@@ -21,9 +26,28 @@ app.use(
 );
 
 app.use(bodyParser.json({ limit: "10mb" }));
-app.use(bodyParser.urlencoded({ extended: true, limit: "10mb" }));
 
-// ✅ Google Sheets Auth
+/* ---------------------------
+   💾 File Upload Config
+--------------------------- */
+// Create uploads folder if it doesn’t exist
+const uploadDir = "./uploads";
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+
+// Store uploaded files in /uploads with timestamped filenames
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) =>
+    cb(null, Date.now() + "-" + file.originalname.replace(/\s+/g, "_")),
+});
+const upload = multer({ storage });
+
+// Make uploads folder publicly accessible
+app.use("/uploads", express.static("uploads"));
+
+/* ---------------------------
+   📊 Google Sheets Auth
+--------------------------- */
 const auth = new google.auth.GoogleAuth({
   credentials: {
     client_email: process.env.GOOGLE_CLIENT_EMAIL,
@@ -35,13 +59,19 @@ const auth = new google.auth.GoogleAuth({
 const sheets = google.sheets({ version: "v4", auth });
 const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
 
-// ✅ Root Route
+/* ---------------------------
+   🚀 Health Check
+--------------------------- */
 app.get("/", (req, res) => {
   res.send("✅ YUGANTRAN 2025 Backend Running Successfully!");
 });
 
-// ✅ Submit Route (Fully Updated)
-app.post("/submit", async (req, res) => {
+/* ---------------------------
+   📝 Submit Registration
+--------------------------- */
+app.post("/submit", upload.single("paymentReceipt"), async (req, res) => {
+  console.log("📩 Incoming form data:", req.body);
+
   try {
     const {
       name,
@@ -56,48 +86,64 @@ app.post("/submit", async (req, res) => {
       teamMembers,
     } = req.body;
 
-    // 🧩 Basic Validation
-    if (!name || !rollNumber || !department || !semester || !mobileNumber || !college || !eventType) {
+    // ✅ Validation
+    if (
+      !name ||
+      !rollNumber ||
+      !department ||
+      !semester ||
+      !mobileNumber ||
+      !college ||
+      !eventType
+    ) {
       return res.status(400).send("❌ Missing required fields.");
     }
 
-    // 🧩 Get current row count for Sr No.
+    // ✅ Handle uploaded file
+    let paymentReceiptUrl = "-";
+    if (req.file) {
+      // Create public URL to the uploaded file
+      paymentReceiptUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
+      console.log("📎 File uploaded successfully:", paymentReceiptUrl);
+    }
+
+    // ✅ Get total rows for Sr. No.
     const getRows = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: "Sheet1!A:A",
+      range: "Submissions!A:A",
     });
-
     const srNo = getRows.data.values ? getRows.data.values.length : 1;
 
-    // 🧩 Format data for sheet
+    // ✅ Format data for Sheets
     const formattedTeamMembers = Array.isArray(teamMembers)
       ? teamMembers.filter((m) => m.trim() !== "").join(", ")
-      : "";
+      : teamMembers || "-";
 
     const eventDisplay = Array.isArray(eventType)
       ? eventType.join(", ")
       : eventType;
 
-    // ✅ Append data
+    // ✅ Append to Google Sheet
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: "Sheet1!A:K",
+      range: "Submissions!A:M",
       valueInputOption: "RAW",
       requestBody: {
         values: [
           [
-            srNo,                               // A: Sr No
-            name,                               // B: Name
-            rollNumber,                         // C: Roll No
-            department,                         // D: Department
-            semester,                           // E: Semester
-            mobileNumber,                       // F: Mobile
-            college,                            // G: College
-            eventDisplay,                       // H: Event(s)
-            teamType || "Individual",           // I: Team Type
-            teamName || "-",                    // J: Team Name
-            formattedTeamMembers || "-",        // K: Team Members
-            new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }), // L: Timestamp
+            srNo,
+            name,
+            rollNumber,
+            department,
+            semester,
+            mobileNumber,
+            college,
+            eventDisplay,
+            teamType || "Individual",
+            teamName || "-",
+            formattedTeamMembers,
+            paymentReceiptUrl, // ✅ Store URL not base64
+            new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
           ],
         ],
       },
@@ -111,6 +157,8 @@ app.post("/submit", async (req, res) => {
   }
 });
 
-// ✅ Start Server
+/* ---------------------------
+   🌐 Start Server
+--------------------------- */
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
