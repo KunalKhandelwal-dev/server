@@ -3,25 +3,25 @@ import cors from "cors";
 import bodyParser from "body-parser";
 import { google } from "googleapis";
 import dotenv from "dotenv";
-import fs from "fs";
 
 dotenv.config();
 const app = express();
 
-// ✅ CORS setup
+// ✅ Middleware
 app.use(
   cors({
     origin: [
-      "https://yugantran.netlify.app", // your deployed frontend
-      "http://localhost:3000",         // local dev (CRA)
-      "http://localhost:5173"          // local dev (Vite)
+      "https://yugantran.netlify.app", // deployed frontend
+      "http://localhost:3000",         // local CRA
+      "http://localhost:5173"          // local Vite
     ],
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    methods: ["GET", "POST"],
     credentials: true,
   })
 );
 
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: "10mb" }));
+app.use(bodyParser.urlencoded({ extended: true, limit: "10mb" }));
 
 // ✅ Google Sheets Auth
 const auth = new google.auth.GoogleAuth({
@@ -37,10 +37,10 @@ const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
 
 // ✅ Root Route
 app.get("/", (req, res) => {
-  res.send("✅ Backend deployed successfully and is running!");
+  res.send("✅ YUGANTRAN 2025 Backend Running Successfully!");
 });
 
-// ✅ Submit Route (Updated)
+// ✅ Submit Route (Fully Updated)
 app.post("/submit", async (req, res) => {
   try {
     const {
@@ -51,14 +51,17 @@ app.post("/submit", async (req, res) => {
       mobileNumber,
       college,
       eventType,
+      teamType,
+      teamName,
+      teamMembers,
     } = req.body;
 
-    // Basic validation
+    // 🧩 Basic Validation
     if (!name || !rollNumber || !department || !semester || !mobileNumber || !college || !eventType) {
-      return res.status(400).send("Missing required fields");
+      return res.status(400).send("❌ Missing required fields.");
     }
 
-    // ✅ Get current number of rows (for Sr No.)
+    // 🧩 Get current row count for Sr No.
     const getRows = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: "Sheet1!A:A",
@@ -66,33 +69,45 @@ app.post("/submit", async (req, res) => {
 
     const srNo = getRows.data.values ? getRows.data.values.length : 1;
 
-    // ✅ Append data (columns: Sr No, Name, Roll No, Department, Semester, Mobile, Event, College, Timestamp)
+    // 🧩 Format data for sheet
+    const formattedTeamMembers = Array.isArray(teamMembers)
+      ? teamMembers.filter((m) => m.trim() !== "").join(", ")
+      : "";
+
+    const eventDisplay = Array.isArray(eventType)
+      ? eventType.join(", ")
+      : eventType;
+
+    // ✅ Append data
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: "Sheet1!A:I",
+      range: "Sheet1!A:K",
       valueInputOption: "RAW",
       requestBody: {
         values: [
           [
-            srNo,
-            name,
-            rollNumber,
-            department,
-            semester,
-            mobileNumber,
-            eventType,
-            college,
-            new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+            srNo,                               // A: Sr No
+            name,                               // B: Name
+            rollNumber,                         // C: Roll No
+            department,                         // D: Department
+            semester,                           // E: Semester
+            mobileNumber,                       // F: Mobile
+            college,                            // G: College
+            eventDisplay,                       // H: Event(s)
+            teamType || "Individual",           // I: Team Type
+            teamName || "-",                    // J: Team Name
+            formattedTeamMembers || "-",        // K: Team Members
+            new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }), // L: Timestamp
           ],
         ],
       },
     });
 
-    console.log(`✅ Added: ${name} (${rollNumber})`);
-    res.status(200).send("Data added successfully!");
+    console.log(`✅ Added: ${name} (${rollNumber}) | Event: ${eventDisplay}`);
+    res.status(200).send("✅ Registration saved successfully!");
   } catch (error) {
     console.error("❌ Error submitting data:", error);
-    res.status(500).send("Error adding data.");
+    res.status(500).send("⚠️ Server Error while submitting data.");
   }
 });
 
