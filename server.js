@@ -84,6 +84,8 @@ app.post("/submit", upload.single("paymentReceipt"), async (req, res) => {
       teamType,
       teamName,
       teamMembers,
+      upiId,           // <-- Added
+      transactionId,   // <-- Added
     } = req.body;
 
     // ✅ Validation
@@ -94,7 +96,9 @@ app.post("/submit", upload.single("paymentReceipt"), async (req, res) => {
       !semester ||
       !mobileNumber ||
       !college ||
-      !eventType
+      !eventType ||
+      !upiId ||           // <-- Added
+      !transactionId      // <-- Added
     ) {
       return res.status(400).send("❌ Missing required fields.");
     }
@@ -143,6 +147,8 @@ app.post("/submit", upload.single("paymentReceipt"), async (req, res) => {
             teamName || "-",
             formattedTeamMembers,
             paymentReceiptUrl, // ✅ Store URL not base64
+            upiId,            // <-- Added
+            transactionId,    // <-- Added
             new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
           ],
         ],
