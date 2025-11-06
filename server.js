@@ -11,160 +11,172 @@ dotenv.config();
 const app = express();
 
 /* ---------------------------
-   🧩 Middleware Setup
+    🧩 Middleware Setup
 --------------------------- */
 app.use(
-  cors({
-    origin: [
-      "https://yugantran.netlify.app",
-      "http://localhost:3000",
-      "http://localhost:5173",
-    ],
-    methods: ["GET", "POST"],
-    credentials: true,
-  })
+  cors({
+    origin: [
+      "https://yugantran.netlify.app",
+      "http://localhost:3000",
+      "http://localhost:5173",
+    ],
+    methods: ["GET", "POST"],
+    credentials: true,
+  })
 );
 
 app.use(bodyParser.json({ limit: "10mb" }));
 
 /* ---------------------------
-   💾 File Upload Config
+    💾 File Upload Config
 --------------------------- */
-// Create uploads folder if it doesn’t exist
 const uploadDir = "./uploads";
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
-// Store uploaded files in /uploads with timestamped filenames
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) =>
-    cb(null, Date.now() + "-" + file.originalname.replace(/\s+/g, "_")),
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) =>
+    cb(null, Date.now() + "-" + file.originalname.replace(/\s+/g, "_")),
 });
 const upload = multer({ storage });
 
-// Make uploads folder publicly accessible
 app.use("/uploads", express.static("uploads"));
 
 /* ---------------------------
-   📊 Google Sheets Auth
+    📊 Google Sheets Auth
 --------------------------- */
 const auth = new google.auth.GoogleAuth({
-  credentials: {
-    client_email: process.env.GOOGLE_CLIENT_EMAIL,
-    private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-  },
-  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+  credentials: {
+    client_email: process.env.GOOGLE_CLIENT_EMAIL,
+    private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+  },
+  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
 
 const sheets = google.sheets({ version: "v4", auth });
 const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
 
 /* ---------------------------
-   🚀 Health Check
+    🚀 Health Check
 --------------------------- */
 app.get("/", (req, res) => {
-  res.send("✅ YUGANTRAN 2025 Backend Running Successfully!");
+  res.send("✅ YUGANTRAN 2025 Backend Running Successfully!");
 });
 
+// 🌟 NEW ASYNC HELPER FUNCTION 🌟
+// This does the slow work in the background.
+async function saveToSheet(data, fileUrl) {
+  try {
+    const {
+      name,
+      rollNumber,
+      department,
+      semester,
+      mobileNumber,
+      college,
+      eventType,
+      teamType,
+      teamName,
+      teamMembers,
+      upiId,
+      transactionId,
+    } = data;
+
+    // ✅ Format data for Sheets
+    const formattedTeamMembers = Array.isArray(teamMembers)
+      ? teamMembers.filter((m) => m.trim() !== "").join(", ")
+      : teamMembers || "-";
+
+    const eventDisplay = Array.isArray(eventType)
+      ? eventType.join(", ")
+      : eventType;
+  
+    // ✅ Append to Google Sheet (We removed the 'getRows' call)
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      // IMPORTANT: Update range to 'Submissions!B:M' since 'A' is now a formula
+      range: "Submissions!B:M", // Start from 'B' now
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [
+          [
+            // No more srNo, it's a formula in the sheet!
+            name,
+            rollNumber,
+            department,
+            semester,
+            mobileNumber,
+            college,
+            eventDisplay,
+            teamType || "Individual",
+            teamName || "-",
+            formattedTeamMembers,
+            fileUrl, // Use the URL passed to the function
+            upiId,
+            transactionId,
+            new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+          ],
+        ],
+      },
+    });
+
+    console.log(`[BACKGROUND] ✅ Added: ${name} (${rollNumber}) | Event: ${eventDisplay}`);
+  } catch (error) {
+    console.error("❌ [BACKGROUND] Error saving to Sheet:", error);
+    // We can't send an error to the user here, as they've already received 'OK'.
+    // This is for server logging only.
+  }
+}
+
+
 /* ---------------------------
-   📝 Submit Registration
+    📝 Submit Registration (OPTIMIZED)
 --------------------------- */
 app.post("/submit", upload.single("paymentReceipt"), async (req, res) => {
-  console.log("📩 Incoming form data:", req.body);
+  console.log("📩 Incoming form data:", req.body);
 
-  try {
-    const {
-      name,
-      rollNumber,
-      department,
-      semester,
-      mobileNumber,
-      college,
-      eventType,
-      teamType,
-      teamName,
-      teamMembers,
-      upiId,           // <-- Added
-      transactionId,   // <-- Added
-    } = req.body;
+  try {
+    // ✅ Fast Validation
+    const { name, rollNumber, department, semester, mobileNumber, college, eventType, upiId, transactionId } = req.body;
+    if (
+      !name || !rollNumber || !department || !semester || !mobileNumber ||
+      !college || !eventType || !upiId || !transactionId
+    ) {
+      // This check is fast and happens before any API calls
+      return res.status(400).send("❌ Missing required fields.");
+    }
 
-    // ✅ Validation
-    if (
-      !name ||
-      !rollNumber ||
-      !department ||
-      !semester ||
-      !mobileNumber ||
-      !college ||
-      !eventType ||
-      !upiId ||           // <-- Added
-      !transactionId      // <-- Added
-    ) {
-      return res.status(400).send("❌ Missing required fields.");
+    // ✅ Handle uploaded file (Fast)
+    let paymentReceiptUrl = "-";
+    if (req.file) {
+      paymentReceiptUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
+      console.log("📎 File uploaded successfully:", paymentReceiptUrl);
+    } else {
+      // If receipt is mandatory, you should check for it in the validation above
+      return res.status(400).send("❌ Missing payment receipt file.");
     }
 
-    // ✅ Handle uploaded file
-    let paymentReceiptUrl = "-";
-    if (req.file) {
-      // Create public URL to the uploaded file
-      paymentReceiptUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
-      console.log("📎 File uploaded successfully:", paymentReceiptUrl);
+    // 🎉 --- THIS IS THE MAGIC --- 🎉
+    // 1. Send the "OK" response to the user IMMEDIATELY.
+    res.status(200).send("✅ Registration received! We are processing it.");
+    
+    // 2. Call the slow function *WITHOUT* await.
+    // The server will do this in the background.
+    saveToSheet(req.body, paymentReceiptUrl);
+    
+    console.log(`✅ Sent immediate OK for: ${name}. Saving to sheet in background...`);
+
+  } catch (error) {
+    console.error("❌ Error during initial submit:", error);
+    // This catch will only trigger for validation or file system errors
+    if (!res.headersSent) {
+      res.status(500).send("⚠️ Server Error while submitting data.");
     }
-
-    // ✅ Get total rows for Sr. No.
-    const getRows = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: "Submissions!A:A",
-    });
-    const srNo = getRows.data.values ? getRows.data.values.length : 1;
-
-    // ✅ Format data for Sheets
-    const formattedTeamMembers = Array.isArray(teamMembers)
-      ? teamMembers.filter((m) => m.trim() !== "").join(", ")
-      : teamMembers || "-";
-
-    const eventDisplay = Array.isArray(eventType)
-      ? eventType.join(", ")
-      : eventType;
-
-    // ✅ Append to Google Sheet
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID,
-      range: "Submissions!A:M",
-      valueInputOption: "RAW",
-      requestBody: {
-        values: [
-          [
-            srNo,
-            name,
-            rollNumber,
-            department,
-            semester,
-            mobileNumber,
-            college,
-            eventDisplay,
-            teamType || "Individual",
-            teamName || "-",
-            formattedTeamMembers,
-            paymentReceiptUrl, // ✅ Store URL not base64
-            upiId,            // <-- Added
-            transactionId,    // <-- Added
-            new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
-          ],
-        ],
-      },
-    });
-
-    console.log(`✅ Added: ${name} (${rollNumber}) | Event: ${eventDisplay}`);
-    res.status(200).send("✅ Registration saved successfully!");
-  } catch (error) {
-    console.error("❌ Error submitting data:", error);
-    res.status(500).send("⚠️ Server Error while submitting data.");
-  }
+  }
 });
 
 /* ---------------------------
-   🌐 Start Server
+    🌐 Start Server
 --------------------------- */
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
