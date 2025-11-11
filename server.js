@@ -38,7 +38,8 @@ app.use("/uploads", express.static("uploads"));
 const auth = new google.auth.GoogleAuth({
   credentials: {
     client_email: process.env.GOOGLE_CLIENT_EMAIL,
-    private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    // guard replace in case env var is undefined
+    private_key: process.env.GOOGLE_PRIVATE_KEY ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n") : undefined,
   },
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
@@ -83,17 +84,28 @@ async function saveToSheet(data, fileUrl) {
       membersArr = teamMembers;
     }
 
+    // Normalize members and ensure each member has expected fields.
+    // If member.college is missing, fall back to the submitting user's college.
+    const normalizedMembers = membersArr.map((m) => {
+      const sem = (m.semester || "").toString().trim();
+      const dept = (m.program || m.department || "").toString().trim();
+      const roll = (m.rollNumber || m.roll || "").toString().trim();
+      const nm = (m.name || m.fullName || "").toString().trim();
+      const col = (m.college || "").toString().trim() || (college || "").toString().trim() || "-";
+      return {
+        semester: sem || "-",
+        program: dept || "-",
+        rollNumber: roll || "-",
+        name: nm || "-",
+        college: col || "-",
+      };
+    });
+
     // Format members as lines in the requested order:
-    // semester | program | roll number | name
-    const formattedTeamMembers = membersArr.length
-      ? membersArr
-          .map((m) => {
-            const sem = (m.semester || "").toString().trim() || "-";
-            const dept = (m.program || "").toString().trim() || "-";
-            const roll = (m.rollNumber || "").toString().trim() || "-";
-            const nm = (m.name || "").toString().trim() || "-";
-            return `${sem} | ${dept} | ${roll} | ${nm}`;
-          })
+    // semester | program | roll number | name | college
+    const formattedTeamMembers = normalizedMembers.length
+      ? normalizedMembers
+          .map((m) => `${m.semester} | ${m.program} | ${m.rollNumber} | ${m.name} | ${m.college}`)
           .join("\n")
       : "-";
 
@@ -107,19 +119,19 @@ async function saveToSheet(data, fileUrl) {
       requestBody: {
         values: [
           [
-            name,
-            rollNumber,
-            program,
-            semester,
-            mobileNumber,
-            college,
-            eventDisplay,
+            name || "-",
+            rollNumber || "-",
+            program || "-",
+            semester || "-",
+            mobileNumber || "-",
+            college || "-",
+            eventDisplay || "-",
             teamType || "Individual",
             teamName || "-",
-            formattedTeamMembers, // now a multi-line string containing sem|dept|roll|name per line
-            fileUrl,
-            upiId,
-            transactionId,
+            formattedTeamMembers, // multi-line string containing sem|dept|roll|name|college per line
+            fileUrl || "-",
+            upiId || "-",
+            transactionId || "-",
             new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
           ],
         ],
