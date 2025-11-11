@@ -5,13 +5,15 @@ import multer from "multer";
 import { google } from "googleapis";
 import dotenv from "dotenv";
 import fs from "fs";
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
+import axios from "axios"; // ✅ added for Mailtrap API
 
 dotenv.config();
 const app = express();
 
-// ...cors, parser and multer config unchanged
-
+// ------------------------------------
+// 🌐 CORS, Body Parser, Multer Config
+// ------------------------------------
 app.use(
   cors({
     origin: [
@@ -38,9 +40,9 @@ const upload = multer({ storage });
 
 app.use("/uploads", express.static("uploads"));
 
-// -----------------------------
+// ------------------------------------
 // 📊 Google Sheets Setup (unchanged)
-// -----------------------------
+// ------------------------------------
 const auth = new google.auth.GoogleAuth({
   credentials: {
     client_email: process.env.GOOGLE_CLIENT_EMAIL,
@@ -54,72 +56,73 @@ const auth = new google.auth.GoogleAuth({
 const sheets = google.sheets({ version: "v4", auth });
 const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
 
-// -----------------------------
-// ✉️ Nodemailer Setup (unchanged)
-// -----------------------------
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.GMAIL_USER, // Gmail address
-    pass: process.env.GMAIL_PASS, // App password (16 chars)
-  },
-});
+// ------------------------------------
+// ✉️ Mailtrap API Email Sender (No SMTP)
+// ------------------------------------
 
 // Send confirmation email WITH WhatsApp link
-async function sendConfirmationEmail(to, payload) {
-  const mailOptions = {
-    from:
-      process.env.MAIL_FROM ||
-      `"YUGANTRAN 2025" <${process.env.GMAIL_USER}>`,
-    to,
-    subject: `🎉 YUGANTRAN2.0 — Registration Confirmed${payload.event ? `: ${payload.event}` : ""}`,
-    text: `Hello ${payload.name},
 
-Your registration for ${payload.event ?? "the selected event"} has been received.
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+async function sendConfirmationEmail(to, payload) {
+  const subject = `Registration Confirmed${payload.event ? `: ${payload.event}` : ""} — YUGANTRAN2.0 2025`;
+
+  const plainTextContent = `
+Hello ${payload.name},
+
+Thank you for registering for ${payload.event ?? "the selected event"} at YUGANTRAN2.0 2025.
 
 Team Name: ${payload.teamName ?? "N/A"}
 Transaction ID: ${payload.transactionId ?? "N/A"}
 
-📱 Join ${payload.event ?? "the selected event"} WhatsApp group for important updates:
-${payload.whatsappLink ?? "-"}
+${payload.whatsappLink ? `Join the WhatsApp group for updates:\n${payload.whatsappLink}\n\n` : ""} 
 
-Thank you for registering for YUGANTRAN2.0 2025.
+If you have any questions, please contact us at yugantran@geetauniversity.edu.in.
 
-Regards,
-YUGANTRAN Team
-Geeta University`,
+Best regards,
+YUGANTRAN2.0 Team
+Geeta University
+`;
 
-    html: `
-      <div style="font-family: Arial, sans-serif; color: #222;">
-        <h2>🎉 Registration Confirmed!</h2>
-        <p>Hello <strong>${payload.name}</strong>,</p>
-        <p>Your registration for <strong>${payload.event ?? "the selected event"}</strong> has been successfully received.</p>
-
-        ${
-          payload.whatsappLink
-            ? `<p>📱 <strong>Join ${payload.event ?? "the selected event"} WhatsApp Group</strong> for updates, announcements, and coordination:</p>
-               <p><a href="${payload.whatsappLink}" style="background:#25D366;color:white;padding:10px 15px;text-decoration:none;border-radius:5px;font-weight:bold;">
-               Join WhatsApp Group</a></p>`
-            : ""
-        }
-
-        <p>Thank you for being part of <strong>YUGANTRAN2.0 2025</strong>!</p>
-        <p>Regards,<br/>YUGANTRAN Team<br/>Geeta University</p>
-      </div>
-    `,
-  };
+  const htmlContent = `
+    <div style="font-family: Arial, sans-serif; max-width:600px; margin:auto; color:#333;">
+      <h2 style="color:#0073e6;">Registration Confirmed</h2>
+      <p>Hello <strong>${payload.name}</strong>,</p>
+      <p>Thank you for registering for <strong>${payload.event ?? "the selected event"}</strong> at <strong>YUGANTRAN2.0 2025</strong>.</p>
+      ${payload.whatsappLink
+      ? `<p>📱 <strong>Join the WhatsApp group</strong> for updates and coordination:</p>
+             <p><a href="${payload.whatsappLink}" style="display:inline-block; background:#25D366; color:#fff; padding:10px 20px; border-radius:5px; text-decoration:none; font-weight:bold;">Join WhatsApp Group</a></p>`
+      : ""
+    }
+      <p>If you have any questions, feel free to contact us at <a href="mailto:yugantran@geetauniversity.edu.in">yugantran@geetauniversity.edu.in</a>.</p>
+      <hr style="border:none; border-top:1px solid #eee; margin:20px 0;">
+      <p style="font-size:12px; color:#777;">
+        This email was sent by YUGANTRAN2.0 2025, Geeta University.<br>
+        Please do not reply to this automated message.
+      </p>
+    </div>
+  `;
 
   try {
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`📧 Email sent to ${to}: ${info.messageId}`);
+    const response = await resend.emails.send({
+      from: "YUGANTRAN2.0 2025 <onboarding@resend.dev>",
+      to: to,
+      subject: subject,
+      html: htmlContent,
+      text: plainTextContent,
+    });
+
+    console.log(`📧 Email sent via Resend to ${to}:`, response.id);
   } catch (error) {
-    console.error("❌ Error sending email:", error);
+    console.error("❌ Error sending email via Resend:", error.message || error);
   }
 }
 
-// -----------------------------
-// 🗂 Save Data to Google Sheet (unchanged, except whatsappLink is now expected from frontend)
-// -----------------------------
+
+// ------------------------------------
+// 🗂 Save Data to Google Sheet (unchanged)
+// ------------------------------------
 async function saveToSheet(data, fileUrl) {
   try {
     const {
@@ -136,10 +139,8 @@ async function saveToSheet(data, fileUrl) {
       upiId,
       transactionId,
       email,
-      whatsappLink, // <-- frontend passes right link!
+      whatsappLink, // frontend passes right link
     } = data;
-
-    // ...team member normalization logic unchanged...
 
     let membersArr = [];
     if (!teamMembers) membersArr = [];
@@ -162,18 +163,17 @@ async function saveToSheet(data, fileUrl) {
 
     const formattedTeamMembers = normalizedMembers.length
       ? normalizedMembers
-          .map(
-            (m) =>
-              `${m.semester} | ${m.program} | ${m.rollNumber} | ${m.name} | ${m.college}`
-          )
-          .join("\n")
+        .map(
+          (m) =>
+            `${m.semester} | ${m.program} | ${m.rollNumber} | ${m.name} | ${m.college}`
+        )
+        .join("\n")
       : "-";
 
     const eventDisplay = Array.isArray(eventType)
       ? eventType.join(", ")
       : eventType;
 
-    // Append to Google Sheet
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
       range: "Submissions!B:O",
@@ -202,14 +202,14 @@ async function saveToSheet(data, fileUrl) {
 
     console.log(`[SHEET] ✅ Added: ${name} (${rollNumber}) | Event: ${eventDisplay}`);
 
-    // Send confirmation email if email provided (with WhatsApp link)
+    // Send confirmation email if email provided
     if (email) {
       sendConfirmationEmail(email, {
         name,
         event: eventDisplay,
         teamName,
         transactionId,
-        whatsappLink, // will be included in mail!
+        whatsappLink,
       });
     }
   } catch (error) {
@@ -217,11 +217,11 @@ async function saveToSheet(data, fileUrl) {
   }
 }
 
-// -----------------------------
-// 🚀 Routes (unchanged except added whatsappLink extraction from body)
-// -----------------------------
+// ------------------------------------
+// 🚀 Routes (unchanged)
+// ------------------------------------
 app.get("/", (req, res) => {
-  res.send("✅ YUGANTRAN 2025 Backend Running Successfully!");
+  res.send("✅ YUGANTRAN2.0 2025 Backend Running Successfully!");
 });
 
 app.post("/submit", upload.single("paymentReceipt"), async (req, res) => {
@@ -238,8 +238,7 @@ app.post("/submit", upload.single("paymentReceipt"), async (req, res) => {
       eventType,
       upiId,
       transactionId,
-      // ...other fields
-      whatsappLink, // will arrive from frontend for current event
+      whatsappLink,
     } = req.body;
 
     if (
@@ -264,10 +263,8 @@ app.post("/submit", upload.single("paymentReceipt"), async (req, res) => {
       return res.status(400).send("❌ Missing payment receipt file.");
     }
 
-    // Immediate response
     res.status(200).send("✅ Registration received! We are processing it.");
 
-    // Save to sheet & send email in background (pass whatsappLink)
     saveToSheet({ ...req.body, whatsappLink }, paymentReceiptUrl);
 
     console.log(`✅ Sent immediate OK for: ${name}. Saving to sheet and sending email...`);
@@ -279,8 +276,10 @@ app.post("/submit", upload.single("paymentReceipt"), async (req, res) => {
   }
 });
 
-// ...server listen unchanged...
+// ------------------------------------
+// 🖥️ Server Listen
+// ------------------------------------
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () =>
-  console.log(`🚀 YUGANTRAN Backend running on port ${PORT}`)
+  console.log(`🚀 YUGANTRAN2.0 Backend running on port ${PORT}`)
 );
