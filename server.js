@@ -117,7 +117,7 @@ async function saveToSheet(data, fileUrl) {
 
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: "Submissions!B:O",
+      range: "Submissions!B:P",
       valueInputOption: "RAW",
       requestBody: {
         values: [
@@ -136,6 +136,8 @@ async function saveToSheet(data, fileUrl) {
             upiId || "-",
             transactionId || "-",
             new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+            "-",
+            email || "-"
           ],
         ],
       },
